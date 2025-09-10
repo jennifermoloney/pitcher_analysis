@@ -2,11 +2,16 @@ import numpy as np
 import pandas as pd
 
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
-pitch_counts = pitches_22.groupby("pitcher").size()
+pitches_23 = pd.read_csv("updated_pitches_23.csv")
+
+pitches_22["Year"] = 2022
+pitches_23["Year"] = 2023
+pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
+pitch_counts = pitches_all.groupby("pitcher").size()
 valid_pitchers = pitch_counts[pitch_counts > 100].index
 
-filtered_pitches = pitches_22[pitches_22["pitcher"].isin(valid_pitchers)]
-
+filtered_pitches = pitches_all[pitches_all["pitcher"].isin(valid_pitchers)]
+pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
 variance_df = (
     filtered_pitches.groupby("pitcher")[["initposx", "initposz"]]
     .var()
@@ -19,7 +24,7 @@ variance_df_sorted_total = variance_df.sort_values("total_var")
 print(variance_df_sorted_total)
 
 
-jose_pitches = pitches_22[pitches_22['pitcher'] == 'Rainey, Tanner']
+jose_pitches = pitches_all[pitches_all['pitcher'] == 'Rainey, Tanner']
 pitch_counts = jose_pitches['pitchname_desc'].value_counts().sort_values(ascending=False)
 
 print("Types of pitches:")
