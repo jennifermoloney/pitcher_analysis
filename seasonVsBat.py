@@ -4,7 +4,6 @@ from itertools import combinations
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-
 # Basic data cleaning
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
@@ -17,6 +16,16 @@ pitch_counts = pitches_all.groupby("pitcher").size()
 # Only include pitchers that have pitched over 200 times in two seasons
 valid_pitchers = pitch_counts[pitch_counts > 200].index
 filtered = pitches_all.set_index(["pitcher","Year"]).loc[valid_pitchers].reset_index()
+
+keys = ["gameid", "ab", "pitcher", "Year"]
+
+pitch_ct   = filtered.groupby(keys)["pitchnum"].transform("count")
+type_ct    = filtered.groupby(keys)["pitchname_desc"].transform("nunique")
+
+mask = (pitch_ct > 1) & (type_ct > 1)
+
+
+filtered_multiAB = filtered[mask].copy()
 
 season_var = (
     filtered.groupby(["pitcher","Year"])[["initposx","initposz"]]
@@ -56,15 +65,16 @@ def atbat_mean_dist(group):
     return np.mean(np.linalg.norm(pts - center, axis=1))
 
 atbat_df = (
-    filtered.groupby(["gameid","ab","pitcher","Year"])
+    filtered_multiAB.groupby(keys)
             .apply(atbat_mean_dist)
-            .rename("mean_atbat_dist")
+            .rename("mean_init_atbat_dist")
             .reset_index()
 )
 
 print(atbat_df.head())
+
 atbat_outcomes = (
-    filtered.groupby(["gameid","ab","pitcher","Year"])["eventtype"]
+    filtered_multiAB.groupby(keys)["eventtype"]
             .first()
             .reset_index()
 )
@@ -77,8 +87,6 @@ top_events = (atbat_full['eventtype']
               .index)
 
 
-
-
-#sns.boxplot(x="eventtype", y="mean_atbat_dist",
-#            data=atbat_full[atbat_full['eventtype'].isin(top_events)])
-#plt.show()
+sns.scatterplot(x="eventtype", y="mean_init_atbat_dist",
+           data=atbat_full[atbat_full['eventtype'].isin(top_events)])
+plt.show()
