@@ -116,34 +116,47 @@ print(leaderboard.head(15))
 
 results = []
 
-clean_ab = atbat_df.replace([np.inf, -np.inf], np.nan).dropna(subset=["tunnel_ratio","pitcher","Year"])
+eps = 1e-9
 
-# Keep only pitcher-seasons that pass your innings threshold
-ok_pairs = pitcher_season[["pitcher","Year"]].drop_duplicates()
-clean_ab = clean_ab.merge(ok_pairs, on=["pitcher","Year"], how="inner")
-
-for y, sub in clean_ab.groupby("Year"):
-    sub = sub.copy()
-    sub["log_tunnel_ratio"] = np.log(sub["tunnel_ratio"])
-
-    # Random-intercept model
-    m = smf.mixedlm("log_tunnel_ratio ~ 1", data=sub, groups=sub["pitcher"])
-    r = m.fit(method="lbfgs")
-
-    # BLUPs = pitcher tunneling scores for that season
-    re = pd.DataFrame({
-        "pitcher": list(r.random_effects.keys()),
-        "tunneling_score": [v[0] for v in r.random_effects.values()],
-        "Year": y
-    })
-    re["tunneling_score_z"] = (
-        (re["tunneling_score"] - re["tunneling_score"].mean()) /
-        (re["tunneling_score"].std(ddof=0))
-    )
-    results.append(re)
-
-me_leaderboard = (
-    pd.concat(results, ignore_index=True)
-      .sort_values(["Year","tunneling_score_z"], ascending=[True, False])
+# AB length
+ab_len = (
+    fb_sl_pitches.groupby(["gameid","ab","pitcher","Year"])
+    .size().rename("ab_len").reset_index()
 )
-print(me_leaderboard.head(15))
+
+clean_ab = (
+    atbat_df.merge(ab_len, on=["gameid","ab","pitcher","Year"], how="left")
+            .assign(tunnel_ratio=lambda d: d["mean_end_atbat_dist"]/(d["mean_init_atbat_dist"]+eps),
+                    log_tunnel_ratio=lambda d: np.log(d["tunnel_ratio"] + eps))
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len"])
+)
+
+# Optional stability screen
+stable_pitchers = (clean_ab.groupby("pitcher").size()
+                   .reset_index(name="n_fbsl_ABs_total")
+                   .query("n_fbsl_ABs_total >= 20")["pitcher"])
+clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
+
+# Mixed-effects: fixed = C(Year) + ab_len, random = pitcher
+m = smf.mixedlm("log_tunnel_ratio ~ C(Year) + scale(ab_len)",
+                data=clean_ab, groups=clean_ab["pitcher"])
+r = m.fit(method="lbfgs")
+print(r.summary())
+
+# Overall (pooled) tunneling scores = random intercepts
+re = r.random_effects
+overall_scores = pd.DataFrame({
+    "pitcher": list(re.keys()),
+    "tunneling_score": [v[0] for v in re.values()]
+})
+
+# Per-year display (z within each season using the same pooled score)
+pitcher_years = clean_ab[["pitcher","Year"]].drop_duplicates()
+per_year = pitcher_years.merge(overall_scores, on="pitcher", how="left")
+per_year["tunneling_score_z"] = (
+    per_year.groupby("Year")["tunneling_score"]
+            .transform(lambda s: (s - s.mean())/(s.std(ddof=0) + eps))
+)
+yearly_leaderboard = per_year.sort_values(["Year","tunneling_score_z"], ascending=[True, False])
+print(yearly_leaderboard.groupby("Year").head(15))
