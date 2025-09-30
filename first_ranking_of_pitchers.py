@@ -83,7 +83,7 @@ pitcher_season = pitcher_season.merge(innings_per_season,
                                       how="left")
 
 # filter for minimum innings
-pitcher_season = pitcher_season[pitcher_season["n_innings"] >= 162]
+pitcher_season = pitcher_season[pitcher_season["n_innings"] >= 30]
 
 pitcher_season["tunnel_ratio_median_z"] = (
     pitcher_season.groupby("Year")["tunnel_ratio_median"]
@@ -93,5 +93,12 @@ pitcher_season["tunnel_ratio_median_z"] = (
 pitcher_season["proto_tunnel_score"] = pitcher_season["tunnel_ratio_median_z"]
 
 leaderboard = pitcher_season.sort_values(["Year","proto_tunnel_score"], ascending=[True, False])
-print(leaderboard.head(15))
+print(leaderboard[['pitcher', 'proto_tunnel_score']].head(15))
 
+'''
+sns.histplot(pitcher_season["proto_tunnel_score"], bins=40, kde=True)
+plt.axvline(0, color="red", linestyle="--")
+plt.xlabel("Pitcher simple tuneling stat (z-score)")
+plt.title("Histogram of Pitcher Tunneling Scores")
+plt.show()
+'''

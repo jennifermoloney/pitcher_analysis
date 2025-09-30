@@ -160,3 +160,13 @@ per_year["tunneling_score_z"] = (
 )
 yearly_leaderboard = per_year.sort_values(["Year","tunneling_score_z"], ascending=[True, False])
 print(yearly_leaderboard.groupby("Year").head(15))
+
+print(yearly_leaderboard[['pitcher', 'tunneling_score_z']].head(15))
+
+'''
+sns.histplot(per_year["tunneling_score_z"], bins=40, kde=True)
+plt.axvline(0, color="red", linestyle="--")
+plt.xlabel("Pitcher random effect (tunneling score)")
+plt.title("Histogram of Pitcher Tunneling Scores")
+plt.show()
+'''
