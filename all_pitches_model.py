@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import statsmodels.formula.api as smf
 
-
+# Calculates pitch scores wit 4 fixed effects
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
 
@@ -74,6 +74,25 @@ innings_per_season = (
       .reset_index(name="n_innings")
 )
 
+# Include new fixed effects for model -> release speed, spin rate, score differential
+ab_pitch_metrics = (
+    filtered_multiAB
+    .groupby(["gameid", "ab", "pitcher", "Year"])
+    .agg(
+        mean_relspeed=("relspeed", "mean"),
+        mean_spinrate=("spinrate", "mean"),
+        visscore_last=("visscore", "last"),
+        homscore_last=("homscore", "last")
+    )
+    .reset_index()
+)
+
+# 2. Score differential = home − visitor
+ab_pitch_metrics["score_diff"] = (
+    ab_pitch_metrics["homscore_last"] - ab_pitch_metrics["visscore_last"]
+)
+
+
 eps = 1e-9
 
 # AB length
@@ -83,11 +102,16 @@ ab_len = (
 )
 
 clean_ab = (
-    atbat_df.merge(ab_len, on=["gameid","ab","pitcher","Year"], how="left")
-            .assign(tunnel_ratio=lambda d: d["mean_end_atbat_dist"]/(d["mean_init_atbat_dist"]+eps),
-                    log_tunnel_ratio=lambda d: np.log(d["tunnel_ratio"] + eps))
-            .replace([np.inf, -np.inf], np.nan)
-            .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len"])
+    atbat_df
+    .merge(ab_len, on=["gameid","ab","pitcher","Year"], how="left")
+    .merge(ab_pitch_metrics, on=["gameid","ab","pitcher","Year"], how="left")
+    .assign(
+        tunnel_ratio=lambda d: d["mean_end_atbat_dist"]/(d["mean_init_atbat_dist"]+eps),
+        log_tunnel_ratio=lambda d: np.log(d["tunnel_ratio"] + eps)
+    )
+    .replace([np.inf, -np.inf], np.nan)
+    .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len",
+                    "mean_relspeed","mean_spinrate","score_diff"])
 )
 
 stable_pitchers = (clean_ab.groupby("pitcher").size()
@@ -95,11 +119,12 @@ stable_pitchers = (clean_ab.groupby("pitcher").size()
                    .query("ABs_total >= 20")["pitcher"])
 clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
-# Mixed-effects: fixed = C(Year) + ab_len, random = pitcher
-m = smf.mixedlm("log_tunnel_ratio ~ C(Year) + scale(ab_len)",
+
+m = smf.mixedlm("log_tunnel_ratio ~ C(Year) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
                 data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())
+
 
 # Overall (pooled) tunneling scores = random intercepts
 re = r.random_effects
@@ -117,4 +142,3 @@ per_year["tunneling_score_z"] = (
 )
 yearly_leaderboard = per_year.sort_values(["Year","tunneling_score_z"], ascending=[True, False])
 print(yearly_leaderboard.head(15))
-

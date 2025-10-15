@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
-from itertools import combinations
-import seaborn as sns
-import matplotlib.pyplot as plt
+### Simple tunnel score ranking
 
 # Basic data cleaning
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
@@ -25,6 +23,7 @@ type_ct    = filtered.groupby(keys)["pitchname_desc"].transform("nunique")
 mask = (pitch_ct > 1) & (type_ct > 1)
 filtered_multiAB = filtered[mask].copy()
 
+# Compute simple tunneling ratio
 def atbat_mean_dist(group):
     pts = group[["initposx","initposz"]].values
     center = pts.mean(axis=0)
@@ -51,16 +50,12 @@ end_df = (
 
 atbat_df = start_df.merge(end_df, on=keys)
 
-#pitch_type_counts = filtered_multiAB['pitchname_desc'].value_counts()
-#top_two_types = pitch_type_counts.head(2).index.tolist()
-#print(top_two_types)
-
+# Create actual tunnel ratio
 atbat_df["tunnel_ratio"] = atbat_df["mean_end_atbat_dist"] / atbat_df["mean_init_atbat_dist"] 
-
 ab_outcomes = filtered_multiAB.groupby(keys)["eventtype"].first().reset_index()
 atbat_df = atbat_df.merge(ab_outcomes, on=keys, how="left")
 
-
+# Creates df of number of ABs for each pitcher and the median of the tunnel score
 pitcher_season = (
     atbat_df.groupby(["pitcher","Year"])
       .agg(
@@ -69,22 +64,25 @@ pitcher_season = (
       )
       .reset_index()
 )
+
+# Check how many innings each pitcher plays per season
 innings_per_season = (
     filtered_multiAB[["pitcher","Year","gameid","inning"]]
-      .drop_duplicates()                      # unique game-inning appearances
+      .drop_duplicates()
       .groupby(["pitcher","Year"])
       .size()
       .reset_index(name="n_innings")
 )
 
-# join to your pitcher_season table
+# Join dfs together
 pitcher_season = pitcher_season.merge(innings_per_season,
                                       on=["pitcher","Year"],
                                       how="left")
 
-# filter for minimum innings
+# filter for minimum num of innings per season
 pitcher_season = pitcher_season[pitcher_season["n_innings"] >= 30]
 
+# Compute the z score of the tunnel ratio to normalize it
 pitcher_season["tunnel_ratio_median_z"] = (
     pitcher_season.groupby("Year")["tunnel_ratio_median"]
     .transform(lambda s: (s - s.mean()) / (s.std(ddof=0) + 1e-9))

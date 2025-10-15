@@ -1,10 +1,8 @@
 import pandas as pd
 import numpy as np
-from itertools import combinations
-import seaborn as sns
-import matplotlib.pyplot as plt
 import statsmodels.formula.api as smf
 from scipy.stats import chi2
+# Tests significance of fixed effects with likelihood test 
 
 # Calculates pitch scores wit 4 fixed effects
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
@@ -120,28 +118,28 @@ stable_pitchers = (clean_ab.groupby("pitcher").size()
 clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
 formula = """
-    log_tunnel_ratio ~ C(Year) + scale(ab_len) +
+    log_tunnel_ratio ~ scale(ab_len) +
     scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)
 """
 
 # Mixed-effects: fixed = C(Year) + ab_len, random = pitcher
-m = smf.mixedlm("log_tunnel_ratio ~ C(Year) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
+m = smf.mixedlm("log_tunnel_ratio ~ scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
                 data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())
 
 ##########
-terms = ["C(Year)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
+terms = ["scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
 full_formula = "log_tunnel_ratio ~ " + " + ".join(terms)
 
 m_full = smf.mixedlm(full_formula, data=clean_ab, groups=clean_ab["pitcher"])
-r_full = m_full.fit(method="lbfgs")
+r_full = m_full.fit(method="lbfgs", reml= False)
 
 def fit_reduced(drop_term):
     reduced_terms = [t for t in terms if t != drop_term]
     reduced_formula = "log_tunnel_ratio ~ " + " + ".join(reduced_terms) if reduced_terms else "log_tunnel_ratio ~ 1"
     m_reduced = smf.mixedlm(reduced_formula, data=clean_ab, groups=clean_ab["pitcher"])
-    return m_reduced.fit(method="lbfgs")
+    return m_reduced.fit(method="lbfgs", reml = False)
 
 lr_results = []
 for term in terms:

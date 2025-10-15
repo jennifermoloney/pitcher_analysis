@@ -1,11 +1,8 @@
 import pandas as pd
 import numpy as np
-from itertools import combinations
-import seaborn as sns
-import matplotlib.pyplot as plt
 import statsmodels.formula.api as smf
 
-
+# Basic data cleaning
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
 
@@ -19,18 +16,20 @@ valid_pitchers = pitch_counts[pitch_counts > 200].index
 filtered = pitches_all.set_index(["pitcher","Year"]).loc[valid_pitchers].reset_index()
 
 keys = ["gameid", "ab", "pitcher", "Year"]
-
 pitch_ct   = filtered.groupby(keys)["pitchnum"].transform("count")
 type_ct    = filtered.groupby(keys)["pitchname_desc"].transform("nunique")
 
 mask = (pitch_ct > 1) & (type_ct > 1)
 filtered_multiAB = filtered[mask].copy()
 
+# Find top two pitch types throughout the whole season
 pitch_type_counts = filtered['pitchname_desc'].value_counts()
 top_two_types = pitch_type_counts.head(2).index.tolist()
 print(top_two_types)
+
 top_two_types = set(top_two_types)
 
+# Filtering to ensure each pitch type occurs in the at bat
 fb_slider_unique = (
     filtered_multiAB.groupby(keys)["pitchname_desc"]
     .transform(lambda s: set(s.unique()).issubset(top_two_types))        
@@ -47,7 +46,7 @@ fb_sl_pitches = filtered_multiAB[
     mask_fb_sl_exact & filtered_multiAB["pitchname_desc"].isin(top_two_types)
 ].copy()
 
-
+# Compute distances to create simple tunnel score
 def atbat_mean_dist(group):
     pts = group[["initposx","initposz"]].values
     center = pts.mean(axis=0)
@@ -97,11 +96,11 @@ innings_per_season = (
 
 pitcher_season = pitcher_season.merge(innings_per_season, on=["pitcher","Year"], how="left")
 
-# Stability filters: innings + minimum FB/SL ABs
 pitcher_season = pitcher_season[
     (pitcher_season["n_innings"] >= 20)
 ].copy()
 
+# Computes z-score
 pitcher_season["fbsl_tunnel_ratio_median_z"] = (
     pitcher_season.groupby("Year")["fbsl_tunnel_ratio_median"]
     .transform(lambda s: (s - s.mean()) / (s.std(ddof=0)))
@@ -118,12 +117,13 @@ results = []
 
 eps = 1e-9
 
-# AB length
+# Compute the legnth of each at bat for fixed effects in the model
 ab_len = (
     fb_sl_pitches.groupby(["gameid","ab","pitcher","Year"])
     .size().rename("ab_len").reset_index()
 )
 
+# Remove rows with na values
 clean_ab = (
     atbat_df.merge(ab_len, on=["gameid","ab","pitcher","Year"], how="left")
             .assign(tunnel_ratio=lambda d: d["mean_end_atbat_dist"]/(d["mean_init_atbat_dist"]+eps),
@@ -132,7 +132,7 @@ clean_ab = (
             .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len"])
 )
 
-# Optional stability screen
+# Removes pitchers who havent pitched over 20 ABs  
 stable_pitchers = (clean_ab.groupby("pitcher").size()
                    .reset_index(name="n_fbsl_ABs_total")
                    .query("n_fbsl_ABs_total >= 20")["pitcher"])
@@ -144,7 +144,7 @@ m = smf.mixedlm("log_tunnel_ratio ~ C(Year) + scale(ab_len)",
 r = m.fit(method="lbfgs")
 print(r.summary())
 
-# Overall (pooled) tunneling scores = random intercepts
+# Take the overall tunneling score for each pitcher
 re = r.random_effects
 overall_scores = pd.DataFrame({
     "pitcher": list(re.keys()),
