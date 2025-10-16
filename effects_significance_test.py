@@ -112,24 +112,39 @@ clean_ab = (
                     "mean_relspeed","mean_spinrate","score_diff"])
 )
 
+handedness_df = (
+    filtered_multiAB
+    .groupby(["gameid", "ab", "pitcher", "Year"])
+    .agg(
+        pitcher_hand=("pitcherthrows", "first"),
+        batter_hand=("batterside", "first")
+    )
+    .reset_index()
+)
+
+# Merge onto clean_ab
+clean_ab = clean_ab.merge(handedness_df, on=["gameid", "ab", "pitcher", "Year"], how="left")
+
+clean_ab["matchup"] = clean_ab["pitcher_hand"] + " vs " + clean_ab["batter_hand"]
+
 stable_pitchers = (clean_ab.groupby("pitcher").size()
                    .reset_index(name="ABs_total")
                    .query("ABs_total >= 20")["pitcher"])
 clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
 formula = """
-    log_tunnel_ratio ~ scale(ab_len) +
+    log_tunnel_ratio ~ C(mathcup) + scale(ab_len) +
     scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)
 """
 
 # Mixed-effects: fixed = C(Year) + ab_len, random = pitcher
-m = smf.mixedlm("log_tunnel_ratio ~ scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
+m = smf.mixedlm("log_tunnel_ratio ~ C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
                 data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())
 
 ##########
-terms = ["scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
+terms = ["C(matchup)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
 full_formula = "log_tunnel_ratio ~ " + " + ".join(terms)
 
 m_full = smf.mixedlm(full_formula, data=clean_ab, groups=clean_ab["pitcher"])
@@ -152,3 +167,9 @@ for term in terms:
 lr_table = pd.DataFrame(lr_results).sort_values("p")
 print("\n=== Likelihood Ratio Tests ===")
 print(lr_table)
+
+X = clean_ab[["ab_len", "mean_relspeed", "mean_spinrate", "score_diff"]]
+
+# Correlation matrix
+corr = X.corr()
+print(corr)
