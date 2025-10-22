@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import statsmodels.formula.api as smf
 from scipy.stats import chi2
-# Tests significance of fixed effects with likelihood test 
+# Final model with all significant fixed effects
 
 # Calculates pitch scores wit 4 fixed effects
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
@@ -135,41 +135,27 @@ clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
 formula = """
     log_tunnel_ratio ~ C(mathcup) + scale(ab_len) +
-    scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)
+    scale(mean_relspeed) + scale(mean_spinrate)
 """
 
-m = smf.mixedlm("log_tunnel_ratio ~ C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
+m = smf.mixedlm("log_tunnel_ratio ~ C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate)",
                 data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())
 
-##########
-terms = ["C(matchup)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
-full_formula = "log_tunnel_ratio ~ " + " + ".join(terms)
+# Overall (pooled) tunneling scores = random intercepts
+re = r.random_effects
+overall_scores = pd.DataFrame({
+    "pitcher": list(re.keys()),
+    "tunneling_score": [v[0] for v in re.values()]
+})
 
-m_full = smf.mixedlm(full_formula, data=clean_ab, groups=clean_ab["pitcher"])
-r_full = m_full.fit(method="lbfgs", reml= False)
-
-def fit_reduced(drop_term):
-    reduced_terms = [t for t in terms if t != drop_term]
-    reduced_formula = "log_tunnel_ratio ~ " + " + ".join(reduced_terms) if reduced_terms else "log_tunnel_ratio ~ 1"
-    m_reduced = smf.mixedlm(reduced_formula, data=clean_ab, groups=clean_ab["pitcher"])
-    return m_reduced.fit(method="lbfgs", reml = False)
-
-lr_results = []
-for term in terms:
-    r_reduced = fit_reduced(term)
-    LR = 2 * (r_full.llf - r_reduced.llf)
-    df = r_full.df_modelwc - r_reduced.df_modelwc
-    p_val = chi2.sf(LR, df)
-    lr_results.append({"term": term, "LR stat": LR, "df": df, "p": p_val})
-
-lr_table = pd.DataFrame(lr_results).sort_values("p")
-print("\n=== Likelihood Ratio Tests ===")
-print(lr_table)
-
-X = clean_ab[["ab_len", "mean_relspeed", "mean_spinrate", "score_diff"]]
-
-# Correlation matrix
-corr = X.corr()
-print(corr)
+# Per-year display (z within each season using the same pooled score)
+pitcher_years = clean_ab[["pitcher","Year"]].drop_duplicates()
+per_year = pitcher_years.merge(overall_scores, on="pitcher", how="left")
+per_year["tunneling_score_z"] = (
+    per_year.groupby("Year")["tunneling_score"]
+            .transform(lambda s: (s - s.mean())/(s.std(ddof=0) + eps))
+)
+yearly_leaderboard = per_year.sort_values(["Year","tunneling_score_z"], ascending=[True, False])
+print(yearly_leaderboard.head(15))
