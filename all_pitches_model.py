@@ -12,6 +12,7 @@ pitches_23 = pd.read_csv("updated_pitches_23.csv")
 pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
 pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
+pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
 pitch_counts = pitches_all.groupby("pitcher").size()
 
 valid_pitchers = pitch_counts[pitch_counts > 200].index
