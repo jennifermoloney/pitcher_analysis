@@ -13,6 +13,19 @@ pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
 pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
 pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
+# --- Basic Data Cleaning ---
+# 1. Remove rows with invalid number of outs (should only be 0, 1, or 2)
+pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
+
+# 2. Drop rows with missing critical coordinates
+pitches_all = pitches_all.dropna(subset=["initposx", "initposz", "platelocside", "platelocheight"])
+
+# 3. Remove impossible pitch speeds or spin rates (optional sanity filter)
+pitches_all = pitches_all[
+    (pitches_all["relspeed"].between(50, 110)) &  # mph
+    (pitches_all["spinrate"].between(0, 4000))
+]
+
 pitch_counts = pitches_all.groupby("pitcher").size()
 
 valid_pitchers = pitch_counts[pitch_counts > 200].index

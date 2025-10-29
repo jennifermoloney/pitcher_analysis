@@ -12,6 +12,19 @@ pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
 pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
 pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
+# --- Basic Data Cleaning ---
+# 1. Remove rows with invalid number of outs (should only be 0, 1, or 2)
+pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
+
+# 2. Drop rows with missing critical coordinates
+pitches_all = pitches_all.dropna(subset=["initposx", "initposz", "platelocside", "platelocheight"])
+
+# 3. Remove impossible pitch speeds or spin rates (optional sanity filter)
+pitches_all = pitches_all[
+    (pitches_all["relspeed"].between(50, 110)) &  # mph
+    (pitches_all["spinrate"].between(0, 4000))
+]
+
 pitch_counts = pitches_all.groupby("pitcher").size()
 
 valid_pitchers = pitch_counts[pitch_counts > 200].index
@@ -81,7 +94,8 @@ ab_pitch_metrics = (
         mean_relspeed=("relspeed", "mean"),
         mean_spinrate=("spinrate", "mean"),
         visscore_last=("visscore", "last"),
-        homscore_last=("homscore", "last")
+        homscore_last=("homscore", "last"),
+        metrics_pitching_position=("metrics_pitching_position", "last")
     )
     .reset_index()
 )
@@ -110,7 +124,7 @@ clean_ab = (
     )
     .replace([np.inf, -np.inf], np.nan)
     .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len",
-                    "mean_relspeed","mean_spinrate","score_diff"])
+                    "mean_relspeed","mean_spinrate"])
 )
 
 handedness_df = (
@@ -133,18 +147,30 @@ stable_pitchers = (clean_ab.groupby("pitcher").size()
                    .query("ABs_total >= 20")["pitcher"])
 clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
-formula = """
-    log_tunnel_ratio ~ C(mathcup) + scale(ab_len) +
-    scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)
-"""
+# variables used in formula and as groups
+needed = [
+    "log_tunnel_ratio", "pitcher",
+    "metrics_pitching_position", "matchup",
+    "ab_len", "mean_relspeed", "mean_spinrate"
+]
 
-m = smf.mixedlm("log_tunnel_ratio ~ C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate) + scale(score_diff)",
-                data=clean_ab, groups=clean_ab["pitcher"])
+clean_ab = (
+    clean_ab
+      .replace([np.inf, -np.inf], np.nan)
+      .dropna(subset=needed)
+      .reset_index(drop=True)              # <<< CRITICAL
+)
+
+
+formula = "log_tunnel_ratio ~ C(metrics_pitching_position) + C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate)"
+
+# EITHER pass the column name (now with a clean index)...
+m = smf.mixedlm(formula, data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())
 
 ##########
-terms = ["C(matchup)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)", "scale(score_diff)"]
+terms = ['C(metrics_pitching_position)', "C(matchup)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)"]
 full_formula = "log_tunnel_ratio ~ " + " + ".join(terms)
 
 m_full = smf.mixedlm(full_formula, data=clean_ab, groups=clean_ab["pitcher"])
