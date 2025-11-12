@@ -1,16 +1,21 @@
 import pandas as pd
 import numpy as np
 import statsmodels.formula.api as smf
-from scipy.stats import chi2
+from scipy.stats import chi2, spearmanr
+import seaborn as sns
+import matplotlib.pyplot as plt
 # Final model with all significant fixed effects
 
 # Calculates pitch scores wit 4 fixed effects
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
+pitches_24 = pd.read_csv("updated_pitches_24.csv")
 
 pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
-pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
+pitches_24["Year"] = 2024
+pitches_all = pd.concat([pitches_22, pitches_23, pitches_24], ignore_index=True)
+print(len(pitches_all))
 pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
 pitch_counts = pitches_all.groupby("pitcher").size()
 
@@ -66,6 +71,11 @@ pitcher_season = (
       .reset_index()
 )
 
+pitcher_season["tunnel_ratio_z"] = (
+    pitcher_season.groupby("Year")["tunnel_ratio_median"]
+    .transform(lambda x: (x - x.mean()) / x.std(ddof=0))
+)
+
 innings_per_season = (
     filtered_multiAB[["pitcher","Year","gameid","inning"]]
       .drop_duplicates()
@@ -80,17 +90,10 @@ ab_pitch_metrics = (
     .agg(
         mean_relspeed=("relspeed", "mean"),
         mean_spinrate=("spinrate", "mean"),
-        visscore_last=("visscore", "last"),
-        homscore_last=("homscore", "last")
+        metrics_pitching_position=("metrics_pitching_position", "last")
     )
     .reset_index()
 )
-
-# 2. Score differential = home − visitor
-ab_pitch_metrics["score_diff"] = (
-    ab_pitch_metrics["homscore_last"] - ab_pitch_metrics["visscore_last"]
-)
-
 
 eps = 1e-9
 
@@ -109,8 +112,8 @@ clean_ab = (
         log_tunnel_ratio=lambda d: np.log(d["tunnel_ratio"] + eps)
     )
     .replace([np.inf, -np.inf], np.nan)
-    .dropna(subset=["log_tunnel_ratio","pitcher","Year","ab_len",
-                    "mean_relspeed","mean_spinrate","score_diff"])
+    .dropna(subset=["log_tunnel_ratio","pitcher","ab_len",
+                    "mean_relspeed","mean_spinrate", 'metrics_pitching_position'])
 )
 
 handedness_df = (
@@ -127,24 +130,23 @@ handedness_df = (
 clean_ab = clean_ab.merge(handedness_df, on=["gameid", "ab", "pitcher", "Year"], how="left")
 
 clean_ab["matchup"] = clean_ab["pitcher_hand"] + " vs " + clean_ab["batter_hand"]
-
+print(len(clean_ab["pitcher"].unique()))
 stable_pitchers = (clean_ab.groupby("pitcher").size()
                    .reset_index(name="ABs_total")
                    .query("ABs_total >= 20")["pitcher"])
 clean_ab = clean_ab[clean_ab["pitcher"].isin(stable_pitchers)].copy()
 
-formula = """
-    log_tunnel_ratio ~ C(mathcup) + scale(ab_len) +
-    scale(mean_relspeed) + scale(mean_spinrate)
-"""
 
-m = smf.mixedlm("log_tunnel_ratio ~ C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate)",
-                data=clean_ab, groups=clean_ab["pitcher"])
-r = m.fit(method="lbfgs")
-print(r.summary())
+terms = ['C(metrics_pitching_position)', "C(matchup)", "scale(ab_len)", "scale(mean_relspeed)", "scale(mean_spinrate)"]
+full_formula = "log_tunnel_ratio ~ " + " + ".join(terms)
+
+m_full = smf.mixedlm(full_formula, data=clean_ab, groups=clean_ab["pitcher"])
+r_full = m_full.fit(method="lbfgs", reml= False)
+
+print(r_full.summary())
 
 # Overall (pooled) tunneling scores = random intercepts
-re = r.random_effects
+re = r_full.random_effects
 overall_scores = pd.DataFrame({
     "pitcher": list(re.keys()),
     "tunneling_score": [v[0] for v in re.values()]
@@ -159,3 +161,88 @@ per_year["tunneling_score_z"] = (
 )
 yearly_leaderboard = per_year.sort_values(["Year","tunneling_score_z"], ascending=[True, False])
 print(yearly_leaderboard.head(15))
+
+
+### COMPARE IT TO SIMPLE MODEL
+comparison_df = (
+    pitcher_season
+    .merge(per_year, on=["pitcher", 'Year'], how="inner")
+    .rename(columns={
+        "tunnel_ratio_median": "simple_tunnel_score",
+        'tunnel_ratio_z': "simple_tunnel_score_z",
+        "tunneling_score_z": "mixed_tunnel_score_z",
+        "tunneling_score": "mixed_tunnel_score"
+    })
+)
+
+# Check result
+print(comparison_df.head())
+
+rho, p = spearmanr(comparison_df["simple_tunnel_score_z"], comparison_df["mixed_tunnel_score_z"])
+print(f"Spearman ρ = {rho:.3f}, p = {p:.6g}")
+
+sns.regplot(
+    x="simple_tunnel_score_z",
+    y="mixed_tunnel_score_z",
+    data=comparison_df,
+    scatter_kws={"alpha":0.6},
+    line_kws={"color":"red"}
+)
+plt.xlabel("Simple Tunnel Ratio (Z-score)")
+plt.ylabel("Mixed Effects Tunneling Score")
+plt.title(f"Comparison of Simple vs Mixed Tunneling Models\n(Spearman ρ={rho:.2f})")
+plt.show()
+
+pitcher_summary = (
+    comparison_df.groupby("pitcher")[["simple_tunnel_score_z", "mixed_tunnel_score_z"]]
+    .mean()
+    .reset_index()
+)
+print('done')
+
+top_simple = (
+    pitcher_summary.sort_values("simple_tunnel_score_z", ascending=False)
+    .head(20)[["pitcher", "simple_tunnel_score_z"]]
+    .reset_index(drop=True)
+)
+
+top_mixed = (
+    pitcher_summary.sort_values("mixed_tunnel_score_z", ascending=False)
+    .head(20)[["pitcher", "mixed_tunnel_score_z"]]
+    .reset_index(drop=True)
+)
+
+print("\nTop 10 Pitchers (Simple Model)")
+print(top_simple)
+print(pitcher_summary['simple_tunnel_score_z'].mean())
+
+print("\nTop 10 Pitchers (Mixed-Effects Model)")
+print(top_mixed)
+print(pitcher_summary['mixed_tunnel_score_z'].mean())
+
+out_events = ['field_out']
+num_outs = (
+    filtered_multiAB[filtered_multiAB["eventtype"].isin(out_events)]
+    .groupby("pitcher")
+    .size()
+    .reset_index(name="total_outs")
+)
+
+comparison_df = comparison_df.merge(num_outs, on="pitcher", how="left")
+comparison_df["total_outs"] = comparison_df["total_outs"].fillna(0)
+rho_simple, p_simple = spearmanr(
+    comparison_df["simple_tunnel_score_z"], comparison_df["total_outs"]
+)
+rho_mixed, p_mixed = spearmanr(
+    comparison_df["mixed_tunnel_score_z"], comparison_df["total_outs"]
+)
+
+print(f"Correlation with outs (simple): ρ={rho_simple:.3f}, p={p_simple:.3g}")
+print(f"Correlation with outs (mixed): ρ={rho_mixed:.3f}, p={p_mixed:.3g}")
+
+sns.barplot(x=["Simple", "Mixed"],
+            y=[rho_simple, rho_mixed],
+            palette="Blues_r")
+plt.ylabel("Spearman correlation with Outs")
+plt.title("Model Predictive Strength vs. Pitching Outcomes")
+plt.show()

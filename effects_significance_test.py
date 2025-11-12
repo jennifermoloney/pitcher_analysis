@@ -7,10 +7,12 @@ from scipy.stats import chi2
 # Calculates pitch scores wit 4 fixed effects
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
+pitches_24 = pd.read_csv("updated_pitches_24.csv")
 
 pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
-pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
+pitches_24["Year"] = 2024
+pitches_all = pd.concat([pitches_22, pitches_23, pitches_24], ignore_index=True)
 pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
 # --- Basic Data Cleaning ---
 # 1. Remove rows with invalid number of outs (should only be 0, 1, or 2)
@@ -158,7 +160,7 @@ clean_ab = (
     clean_ab
       .replace([np.inf, -np.inf], np.nan)
       .dropna(subset=needed)
-      .reset_index(drop=True)              # <<< CRITICAL
+      .reset_index(drop=True)
 )
 
 
