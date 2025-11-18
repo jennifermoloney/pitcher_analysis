@@ -2,28 +2,36 @@ import pandas as pd
 import numpy as np
 ### Simple tunnel score ranking
 
-# Basic data cleaning
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
+pitches_24 = pd.read_csv("updated_pitches_24.csv")
 
 pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
-pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
-pitch_counts = pitches_all.groupby("pitcher").size()
+pitches_24["Year"] = 2024
+pitches_all = pd.concat([pitches_22, pitches_23, pitches_24], ignore_index=True)
 
-# Only include pitchers that have pitched over 200 times in two seasons
+# filtered out unreasonable pitch estimates
+pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
+pitches_all = pitches_all.dropna(subset=["initposx", "initposz", "platelocside", "platelocheight"])
+pitches_all = pitches_all[
+    (pitches_all["relspeed"].between(50, 110)) & 
+    (pitches_all["spinrate"].between(0, 4000))
+]
+pitches_all = pitches_all.sort_values(["gameid", "ab", "pitchnum"]).reset_index(drop=True)
+
+pitch_counts = pitches_all.groupby("pitcher").size()
 valid_pitchers = pitch_counts[pitch_counts > 200].index
-filtered = pitches_all.set_index(["pitcher","Year"]).loc[valid_pitchers].reset_index()
+pitches_all = pitches_all[pitches_all["pitcher"].isin(valid_pitchers)].copy()
 
 keys = ["gameid", "ab", "pitcher", "Year"]
 
-pitch_ct   = filtered.groupby(keys)["pitchnum"].transform("count")
-type_ct    = filtered.groupby(keys)["pitchname_desc"].transform("nunique")
-
+pitch_ct = pitches_all.groupby(keys)["pitchnum"].transform("count")
+type_ct  = pitches_all.groupby(keys)["pitchname_desc"].transform("nunique")
 mask = (pitch_ct > 1) & (type_ct > 1)
-filtered_multiAB = filtered[mask].copy()
+filtered_multiAB = pitches_all[mask].copy()
 
-# Compute simple tunneling ratio
+# Create simple tunnel score
 def atbat_mean_dist(group):
     pts = group[["initposx","initposz"]].values
     center = pts.mean(axis=0)
@@ -36,17 +44,18 @@ def atbat_mean_dist_end(group):
 
 start_df = (
     filtered_multiAB.groupby(keys)
-            .apply(atbat_mean_dist)
-            .rename("mean_init_atbat_dist")
-            .reset_index()
+    .apply(atbat_mean_dist)
+    .rename("mean_init_atbat_dist")
+    .reset_index()
 )
 
 end_df = (
     filtered_multiAB.groupby(keys)
-            .apply(atbat_mean_dist_end)
-            .rename("mean_end_atbat_dist")
-            .reset_index()
+    .apply(atbat_mean_dist_end)
+    .rename("mean_end_atbat_dist")
+    .reset_index()
 )
+
 
 atbat_df = start_df.merge(end_df, on=keys)
 
