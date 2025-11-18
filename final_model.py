@@ -191,7 +191,9 @@ sns.regplot(
 plt.xlabel("Simple Tunnel Ratio (Z-score)")
 plt.ylabel("Mixed Effects Tunneling Score")
 plt.title(f"Comparison of Simple vs Mixed Tunneling Models\n(Spearman ρ={rho:.2f})")
+plt.savefig('correlation.png')
 plt.show()
+
 
 pitcher_summary = (
     comparison_df.groupby("pitcher")[["simple_tunnel_score_z", "mixed_tunnel_score_z"]]

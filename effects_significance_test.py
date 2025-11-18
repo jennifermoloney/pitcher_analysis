@@ -4,7 +4,7 @@ import statsmodels.formula.api as smf
 from scipy.stats import chi2
 # Tests significance of fixed effects with likelihood test 
 
-# Calculates pitch scores wit 4 fixed effects
+
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
 pitches_24 = pd.read_csv("updated_pitches_24.csv")
@@ -14,16 +14,13 @@ pitches_23["Year"] = 2023
 pitches_24["Year"] = 2024
 pitches_all = pd.concat([pitches_22, pitches_23, pitches_24], ignore_index=True)
 pitches_all = pitches_all.sort_values(by=["gameid", "ab", "pitchnum"]).reset_index(drop=True)
-# --- Basic Data Cleaning ---
-# 1. Remove rows with invalid number of outs (should only be 0, 1, or 2)
-pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
 
-# 2. Drop rows with missing critical coordinates
+
+pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
 pitches_all = pitches_all.dropna(subset=["initposx", "initposz", "platelocside", "platelocheight"])
 
-# 3. Remove impossible pitch speeds or spin rates (optional sanity filter)
 pitches_all = pitches_all[
-    (pitches_all["relspeed"].between(50, 110)) &  # mph
+    (pitches_all["relspeed"].between(50, 110)) & 
     (pitches_all["spinrate"].between(0, 4000))
 ]
 
@@ -33,7 +30,7 @@ valid_pitchers = pitch_counts[pitch_counts > 200].index
 filtered = pitches_all.set_index(["pitcher","Year"]).loc[valid_pitchers].reset_index()
 keys = ["gameid", "ab", "pitcher", "Year"]
 
-# Count the number of pitches and pitch types per at bat
+
 pitch_ct   = filtered.groupby(keys)["pitchnum"].transform("count")
 type_ct    = filtered.groupby(keys)["pitchname_desc"].transform("nunique")
 
@@ -107,7 +104,6 @@ ab_pitch_metrics["score_diff"] = (
     ab_pitch_metrics["homscore_last"] - ab_pitch_metrics["visscore_last"]
 )
 
-
 eps = 1e-9
 
 # AB length
@@ -165,8 +161,6 @@ clean_ab = (
 
 
 formula = "log_tunnel_ratio ~ C(metrics_pitching_position) + C(matchup) + scale(ab_len) + scale(mean_relspeed) + scale(mean_spinrate)"
-
-# EITHER pass the column name (now with a clean index)...
 m = smf.mixedlm(formula, data=clean_ab, groups=clean_ab["pitcher"])
 r = m.fit(method="lbfgs")
 print(r.summary())

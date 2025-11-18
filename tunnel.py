@@ -20,17 +20,17 @@ def main():
     ap.set_defaults(cross_type_only=True)
     args = ap.parse_args()
 
-    # 1) Read data
+    # Read data
     df = pd.read_csv(args.input_csv, na_values=["NULL","null","NA",""])
     missing = [c for c in REQ_COLS if c not in df.columns]
     if missing:
         sys.exit(f"Missing required columns: {missing}")
 
-    # 2) Sort for sequential pairing
+    # Sort for sequential pairing
     sort_keys = ["gameid","pitcher","ab","pitchnum"]
     df = df.sort_values(sort_keys).reset_index(drop=True)
 
-    # 3) Decision-plane coords by linear interpolation (≈23 ft from plate)
+    # Decision-plane coords by linear interpolation (≈23 ft from plate)
     # If initposy is nonzero: lambda = (initposy - 23)/initposy; else use 0.57 fallback
     dec_plane = 23.0
     lam = np.where(df["initposy"].fillna(0) > 0,
@@ -40,7 +40,7 @@ def main():
     df["x_dec"] = (1 - lam) * df["initposx"] + lam * df["platelocside"]
     df["z_dec"] = (1 - lam) * df["initposz"] + lam * df["platelocheight"]
 
-    # 4) Build next-pitch features (same game/pitcher; usually same AB+batter)
+    # Build next-pitch features (same game/pitcher; usually same AB+batter)
     grp = ["gameid","pitcher"] + (["ab","batter"] if args.same_ab_only else [])
     for col in ["x_dec","z_dec","platelocside","platelocheight","relspeed","pitchname","batter","ab","pitchnum"]:
         df[f"{col}_next"] = df.groupby(grp, dropna=False)[col].shift(-1)
@@ -49,7 +49,7 @@ def main():
     if args.cross_type_only:
         pairs = pairs[pairs["pitchname"] != pairs["pitchname_next"]]
 
-    # 5) Distances and Tunnel Ratio (feet)
+    # Distances and Tunnel Ratio (feet)
     pairs["D_tunnel_ft"] = np.hypot(pairs["x_dec_next"]-pairs["x_dec"],
                                     pairs["z_dec_next"]-pairs["z_dec"])
     pairs["D_plate_ft"]  = np.hypot(pairs["platelocside_next"]-pairs["platelocside"],
@@ -57,14 +57,14 @@ def main():
     eps = 1e-3
     pairs["TR"] = pairs["D_plate_ft"] / (pairs["D_tunnel_ft"] + eps)
 
-    # 6) Select readable columns
+    # Select readable columns
     out_cols = [
         "gameid","pitcher","batter","ab","pitchnum","pitchname","pitchname_next",
         "x_dec","z_dec","x_dec_next","z_dec_next","D_tunnel_ft","D_plate_ft","TR"
     ]
     pairs_out = pairs[out_cols].sort_values(["gameid","pitcher","ab","pitchnum"]).reset_index(drop=True)
 
-    # 7) Per-pitcher summary
+    # Per-pitcher summary
     summary = (pairs.groupby("pitcher")
                     .agg(median_TR=("TR","median"),
                          q25_TR=("TR", lambda s: s.quantile(0.25)),
@@ -74,7 +74,7 @@ def main():
                     .reset_index()
                     .sort_values("median_TR", ascending=False))
 
-    # 8) Write outputs
+    # Write outputs
     pairs_out.to_csv(args.pairs_out, index=False)
     summary.to_csv(args.summary_out, index=False)
     print(f"✅ wrote {args.pairs_out} (pairs) and {args.summary_out} (summary)")

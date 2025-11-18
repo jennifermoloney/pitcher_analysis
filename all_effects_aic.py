@@ -5,22 +5,20 @@ import statsmodels.formula.api as smf
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-eps = 1e-9
-pd.set_option("display.width", 160)
-pd.set_option("display.max_columns", 200)
+# Best subset selection -> finds the most significant combination of features
 
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
+pitches_24 = pd.read_csv("updated_pitches_24.csv")
 
 pitches_22["Year"] = 2022
 pitches_23["Year"] = 2023
+pitches_24["Year"] = 2024
+pitches_all = pd.concat([pitches_22, pitches_23, pitches_24], ignore_index=True)
 
-pitches_all = pd.concat([pitches_22, pitches_23], ignore_index=True)
-
-
+# filtered out unreasonable pitch estimates
 pitches_all = pitches_all[pitches_all["outs"].between(0, 2)]
 pitches_all = pitches_all.dropna(subset=["initposx", "initposz", "platelocside", "platelocheight"])
-
 pitches_all = pitches_all[
     (pitches_all["relspeed"].between(50, 110)) & 
     (pitches_all["spinrate"].between(0, 4000))
@@ -111,6 +109,7 @@ atbat_df = (
     .merge(ab_ctx, on=keys, how="left")
 )
 
+eps = 1e-9
 atbat_df["tunnel_ratio"] = atbat_df["mean_end_atbat_dist"] / (atbat_df["mean_init_atbat_dist"] + eps)
 atbat_df["log_tunnel_ratio"] = np.log(atbat_df["tunnel_ratio"] + eps)
 
@@ -151,7 +150,6 @@ for eff in all_effects:
     print(" •", eff)
 print(f"\nTotal candidate predictors: {len(all_effects)}")
 
-
 results = []
 max_predictors = 5
 
@@ -188,18 +186,3 @@ print(f"\n Best model by BIC:\n{best_by_bic['formula']}")
 best_model = smf.mixedlm(best_formula, data=clean_ab, groups=clean_ab["pitcher"])
 best_fit = best_model.fit(method="lbfgs", reml=True)
 print(best_fit.summary())
-
-coef_df = pd.DataFrame({
-    "Variable": best_fit.params.index,
-    "Estimate": best_fit.params.values,
-    "StdErr": best_fit.bse
-}).query("Variable != 'Intercept'")
-
-plt.figure(figsize=(8,5))
-sns.barplot(data=coef_df, x="Estimate", y="Variable", orient="h")
-plt.axvline(0, color="red", linestyle="--", linewidth=1)
-plt.title("Fixed Effect Estimates — Best Mixed Model")
-plt.xlabel("Estimate")
-plt.ylabel("")
-plt.tight_layout()
-plt.show()
