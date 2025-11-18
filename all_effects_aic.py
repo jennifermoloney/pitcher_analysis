@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 import itertools
 import statsmodels.formula.api as smf
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 # Best subset selection -> finds the most significant combination of features
+# Performs best subset selection of all combination of pitchers
+# Takes quite a while to run, but important to use best subset so we can continue to use p-values
 
 pitches_22 = pd.read_csv("updated_pitches_22.csv")
 pitches_23 = pd.read_csv("updated_pitches_23.csv")
@@ -36,7 +36,7 @@ type_ct  = pitches_all.groupby(keys)["pitchname_desc"].transform("nunique")
 mask = (pitch_ct > 1) & (type_ct > 1)
 filtered_multiAB = pitches_all[mask].copy()
 
-
+# Create simple tunnel score
 def atbat_mean_dist(group):
     pts = group[["initposx","initposz"]].values
     center = pts.mean(axis=0)
@@ -46,7 +46,6 @@ def atbat_mean_dist_end(group):
     pts = group[["platelocside","platelocheight"]].values
     center = pts.mean(axis=0)
     return np.mean(np.linalg.norm(pts - center, axis=1))
-
 
 start_df = (
     filtered_multiAB.groupby(keys)
@@ -64,12 +63,14 @@ end_df = (
 
 atbat_df = start_df.merge(end_df, on=keys, how="inner")
 
+# length of each at bat
 ab_len = (
     filtered_multiAB.groupby(keys)
     .size().rename("ab_len")
     .reset_index()
 )
 
+# create df of possibly important features
 ab_mech = (
     filtered_multiAB.groupby(keys)
     .agg(
@@ -94,14 +95,15 @@ ab_ctx = (
     )
     .reset_index()
 )
+# complete feature cleaning for possibly important features
 ab_ctx["score_diff"] = ab_ctx["homscore_last"] - ab_ctx["visscore_last"]
-
 ab_ctx["pitcherthrows"] = ab_ctx["pitcherthrows"].astype(str).str.upper().str[0]
 ab_ctx["batterside"]    = ab_ctx["batterside"].astype(str).str.upper().str[0]
 
 ab_ctx = ab_ctx[ab_ctx["pitcherthrows"].isin(["L","R"]) & ab_ctx["batterside"].isin(["L","R"])].copy()
 ab_ctx["pl_matchup4"] = ab_ctx["pitcherthrows"] + ab_ctx["batterside"]
 
+# merge all into one df for subset selection
 atbat_df = (
     atbat_df
     .merge(ab_len, on=keys, how="left")
@@ -119,13 +121,9 @@ needed_cols = [
     "inning", "outs", "score_diff", "metrics_pitching_position",
     "pl_matchup4"   
 ]
+
 clean_ab = atbat_df.dropna(subset=needed_cols).copy()
-
 stability = clean_ab.groupby("pitcher").size().rename("n_ABs").reset_index()
-keep_pitchers = stability[stability["n_ABs"] >= 20]["pitcher"]
-clean_ab = clean_ab[clean_ab["pitcher"].isin(keep_pitchers)].copy()
-
-print(f"Modeling rows: {len(clean_ab):,}, pitchers: {clean_ab['pitcher'].nunique()}")
 
 numeric_effects = [
     "scale(ab_len)",
@@ -145,14 +143,10 @@ categorical_effects = [
 ]
 
 all_effects = categorical_effects + numeric_effects
-print("Candidate fixed effects:")
-for eff in all_effects:
-    print(" •", eff)
-print(f"\nTotal candidate predictors: {len(all_effects)}")
-
 results = []
-max_predictors = 5
+max_predictors = 10
 
+# Test all combination of features (takes forever)
 for k in range(1, max_predictors + 1):
     for combo in itertools.combinations(all_effects, k):
         formula = "log_tunnel_ratio ~ " + " + ".join(combo)
@@ -166,23 +160,19 @@ for k in range(1, max_predictors + 1):
                 "LogLik": fit.llf,
                 "Converged": getattr(fit, "converged", True)
             })
-            print(f"Fitted: {formula}")
+            print(f"Fitted")
         except Exception as e:
-            print(f"Failed: {formula}\n   Reason: {e}")
+            print(f"Failed")
 
-
+# sorts models by AIC and BIC values
 results_df = (pd.DataFrame(results)
                 .query("Converged")
                 .sort_values(["AIC","BIC"])
                 .reset_index(drop=True))
-print("\nTop 10 models by AIC:")
-print(results_df.head(10))
 
+
+# Print best model in terms of AIC and BIC
 best_formula = results_df.iloc[0]["formula"]
 print(f"\n Best model by AIC:\n{best_formula}")
 best_by_bic = results_df.sort_values("BIC").iloc[0]
 print(f"\n Best model by BIC:\n{best_by_bic['formula']}")
-
-best_model = smf.mixedlm(best_formula, data=clean_ab, groups=clean_ab["pitcher"])
-best_fit = best_model.fit(method="lbfgs", reml=True)
-print(best_fit.summary())
